@@ -150,129 +150,7 @@ export async function generateCounterfactualNarrative(candidate, auditMetrics) {
   return buildCounterfactualFallback(candidate, auditMetrics);
 }
 
-// Local PDF text extraction + lightweight heuristic parser fallback
-async function localParse(pdfFile) {
-  const arrayBuffer = await new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result);
-    r.onerror = reject;
-    r.readAsArrayBuffer(pdfFile);
-  });
 
-  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf');
-
-  // CRITICAL: Must set workerSrc before calling getDocument.
-  // Without this, pdfjs tries to load its worker from a relative URL like
-  // /static/js/pdf.worker.js which does not exist in CRA. The dev server
-  // returns index.html for unknown routes, and the browser tries to parse
-  // that HTML as a Web Worker script, producing:
-  //   "Uncaught SyntaxError: Unexpected token '<'"
-  // This bypasses all try-catch because it happens inside a Web Worker thread.
-  if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc =
-      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
-  }
-
-  const doc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  const maxPages = Math.min(3, doc.numPages);
-  let fullText = '';
-  for (let i = 1; i <= maxPages; i++) {
-    const page = await doc.getPage(i);
-    const content = await page.getTextContent();
-    const pageText = content.items.map(it => it.str).join(' ');
-    fullText += '\n' + pageText;
-  }
-
-  const lines = fullText.split(/\n|\r|\.|;/).map(s => s.trim()).filter(Boolean);
-  const firstLine = lines[0] || null;
-
-  const name = firstLine;
-  let skills = null;
-  let years_experience = null;
-  let projects_count = null;
-  let college_name = null;
-  let home_city = null;
-
-  for (const l of lines) {
-    const low = l.toLowerCase();
-    if (!skills && (low.includes('skills:') || low.includes('skill:'))) {
-      const part = l.split(':').slice(1).join(':').trim();
-      skills = part ? part.split(/,|;/).map(s => s.trim()).filter(Boolean) : null;
-    }
-    if (!years_experience && low.match(/experience:\s*\d+/)) {
-      const m = low.match(/experience:\s*(\d+)/);
-      if (m) years_experience = Number(m[1]);
-    }
-    if (!projects_count && low.match(/projects?:\s*\d+/)) {
-      const m = low.match(/projects?:\s*(\d+)/);
-      if (m) projects_count = Number(m[1]);
-    }
-    if (!college_name && (low.includes('university') || low.includes('college') || low.match(/iit|nit|bits/i))) {
-      college_name = l;
-    }
-    if (!home_city && low.includes('city')) {
-      const m = l.match(/city[:\-]\s*(.*)/i);
-      if (m) home_city = m[1].trim();
-    }
-  }
-
-  const parsed = {
-    full_name: name || null,
-    surname: name ? name.split(' ').slice(-1)[0] : null,
-    skills: skills || null,
-    years_experience: years_experience || null,
-    projects_count: projects_count || null,
-    github_active: null,
-    college_name: college_name || null,
-    college_city: null,
-    college_state: null,
-    degree_type: null,
-    previous_companies: null,
-    home_city: home_city || null,
-    home_state: null,
-    career_gaps: null,
-    language_complexity_score: null,
-    extraction_type: 'normal',
-    confidence_scores: {
-      full_name: 0.9,
-      skills: skills ? 0.6 : 0.3,
-      years_experience: years_experience ? 0.6 : 0.3,
-      college_name: college_name ? 0.5 : 0.2,
-      previous_companies: 0.2,
-      home_city: home_city ? 0.4 : 0.2
-    }
-  };
-
-  return {
-    ...parsed,
-    parsed_data: {
-      full_name: parsed.full_name,
-      surname: parsed.surname,
-      skills: parsed.skills || [],
-      years_experience: parsed.years_experience || 0,
-      projects_count: parsed.projects_count || 0,
-      github_active: parsed.github_active || false,
-      college_name: parsed.college_name,
-      home_city: parsed.home_city,
-      home_state: parsed.home_state,
-      previous_companies: parsed.previous_companies || [],
-      employment_gaps: parsed.career_gaps || []
-    },
-    metadata: {
-      extraction_type: 'normal',
-      average_confidence: 0.5,
-      confidence_scores: parsed.confidence_scores || {},
-      language_complexity: parsed.language_complexity_score || 0.5,
-      source_file: pdfFile.name,
-      parsed_at: new Date().toISOString()
-    },
-    flagged: {
-      ocr_needed: false,
-      low_confidence: true,
-      complex_language: false
-    }
-  };
-}
 
 async function parseResumeViaBackend(pdfFile) {
   const apiUrl = getResumeParseApiUrl();
@@ -298,24 +176,18 @@ async function parseResumeViaBackend(pdfFile) {
   return data.candidate;
 }
 
-// parseResume uses Gemini with fallback and will try available models for PDF input too
+// parseResume calls backend API for all resume parsing (PDF, DOCX, etc.)
 export async function parseResume(pdfFile) {
   try {
     const backendData = await parseResumeViaBackend(pdfFile);
     return { success: true, attempt: 1, data: backendData, error: null };
   } catch (backendError) {
-    console.error('Backend resume parse failed; using local fallback:', backendError);
-    try {
-      const local = await localParse(pdfFile);
-      return { success: true, attempt: 0, data: local, error: null };
-    } catch (localError) {
-      return {
-        success: false,
-        data: null,
-        error: `${backendError?.message || 'Backend parse failed'} | local parse failed: ${localError?.message || localError}`,
-        attempt: 0
-      };
-    }
+    return {
+      success: false,
+      data: null,
+      error: backendError?.message || 'Backend parse failed',
+      attempt: 1
+    };
   }
 }
 
