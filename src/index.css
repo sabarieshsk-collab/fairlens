@@ -37,3 +37,59 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+
+/* Skeleton loading animation */
+@keyframes skeleton-pulse {
+  0% { opacity: 0.6; }
+  50% { opacity: 1; }
+  100% { opacity: 0.6; }
+}
+.skeleton {
+  background: #E0DBD3;
+  border-radius: 4px;
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+.skeleton-circle {
+  background: #E0DBD3;
+  border-radius: 50%;
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+/* Inline spinner */
+@keyframes fl-spin {
+  to { transform: rotate(360deg); }
+}
+.fl-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #E0DBD3;
+  border-top-color: #1A4D7A;
+  border-radius: 50%;
+  animation: fl-spin 0.8s linear infinite;
+}
+.fl-spinner-lg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Compatibility spinner name required by spec */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #E0DBD3;
+  border-top-color: #1A4D7A;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* Toast slide-in */
+@keyframes toast-in {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+.toast-enter {
+  animation: toast-in 0.3s ease-out;
+}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth } from '../services/firebase';
 
 export function useAuth() {
@@ -8,8 +8,20 @@ export function useAuth() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (localStorage.getItem('fairlens_mock_auth') === 'true') {
-      setUser({ uid: 'mock-user-123', email: 'hr@example.com', displayName: 'HR Manager' });
+    const mockUserJson = sessionStorage.getItem('fairlens_mock_user');
+    if (mockUserJson) {
+      try {
+        setUser(JSON.parse(mockUserJson));
+      } catch (e) {
+        console.error('Failed to parse mock user', e);
+      }
+      setLoading(false);
+      return;
+    }
+
+    const hasFirebaseConfig = process.env.REACT_APP_FIREBASE_API_KEY && process.env.REACT_APP_FIREBASE_API_KEY !== 'your_value_here';
+    
+    if (!hasFirebaseConfig) {
       setLoading(false);
       return;
     }
@@ -33,5 +45,21 @@ export function useAuth() {
     }
   }, []);
 
-  return { user, loading, error };
+  const logout = async () => {
+    sessionStorage.removeItem('fairlens_mock_user');
+    setUser(null);
+    
+    const hasFirebaseConfig = process.env.REACT_APP_FIREBASE_API_KEY && process.env.REACT_APP_FIREBASE_API_KEY !== 'your_value_here';
+    if (!hasFirebaseConfig) return;
+
+    try {
+      if (auth) {
+        await signOut(auth);
+      }
+    } catch (error) {
+      console.error('Logout error', error);
+    }
+  };
+
+  return { user, loading, error, logout };
 }

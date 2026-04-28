@@ -13,7 +13,7 @@ export default function Login() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    localStorage.removeItem('fairlens_mock_auth');
+    sessionStorage.removeItem('fairlens_mock_user');
     localStorage.removeItem('fairlens_onboarding_complete');
   }, []);
 
@@ -22,14 +22,34 @@ export default function Login() {
     setLoading(true);
     setError('');
 
+    const isHrDemo = email === 'hr@fairlens.demo' && password === 'Demo@123';
+    const isLegalDemo = email === 'legal@fairlens.demo' && password === 'Demo@123';
+    
+    if (isHrDemo) {
+      sessionStorage.setItem('fairlens_mock_user', JSON.stringify({
+        uid: 'demo-user-hr-001',
+        email: 'hr@fairlens.demo',
+        displayName: 'Ananya Krishnan',
+        role: 'hr_officer',
+        orgId: 'demo-org-001'
+      }));
+      navigate('/dashboard');
+      return;
+    } else if (isLegalDemo) {
+      sessionStorage.setItem('fairlens_mock_user', JSON.stringify({
+        uid: 'demo-user-legal-001',
+        email: 'legal@fairlens.demo',
+        displayName: 'Vikram Mehta',
+        role: 'legal_reviewer',
+        orgId: 'demo-org-001'
+      }));
+      navigate('/dashboard');
+      return;
+    }
+
     if (!process.env.REACT_APP_FIREBASE_API_KEY || process.env.REACT_APP_FIREBASE_API_KEY === 'your_value_here') {
-      if (email.toLowerCase().includes('hr') && password.length > 0) {
-        localStorage.setItem('fairlens_mock_auth', 'true');
-        window.location.href = '/onboarding';
-      } else {
-        setError('Unauthorized access. Your email address must contain "hr" to access this system.');
-        setLoading(false);
-      }
+      setError('Invalid credentials. Use the demo accounts shown below.');
+      setLoading(false);
       return;
     }
 
@@ -109,7 +129,7 @@ export default function Login() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full px-4 py-3 border border-rule rounded-lg focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent"
-                  placeholder="hr@fairlens.ai"
+                  placeholder="hr@fairlens.demo"
                   required
                 />
               </div>
@@ -134,6 +154,29 @@ export default function Login() {
               Secure Sign In
             </button>
           </form>
+
+          {/* Demo Access */}
+          <div className="mt-8 border-t border-rule pt-6 mb-6">
+            <h3 className="text-sm font-medium text-ink mb-4 text-center">Demo Access</h3>
+            <div className="space-y-3">
+              <button 
+                type="button"
+                onClick={() => { setEmail('hr@fairlens.demo'); setPassword('Demo@123'); }}
+                className="w-full text-left p-3 rounded bg-ink/5 hover:bg-ink/10 transition-colors"
+              >
+                <div className="text-sm font-medium text-ink">HR Officer</div>
+                <div className="text-xs text-ink-muted font-mono">hr@fairlens.demo / Demo@123</div>
+              </button>
+              <button 
+                type="button"
+                onClick={() => { setEmail('legal@fairlens.demo'); setPassword('Demo@123'); }}
+                className="w-full text-left p-3 rounded bg-ink/5 hover:bg-ink/10 transition-colors"
+              >
+                <div className="text-sm font-medium text-ink">Legal Reviewer</div>
+                <div className="text-xs text-ink-muted font-mono">legal@fairlens.demo / Demo@123</div>
+              </button>
+            </div>
+          </div>
 
           {/* Small text */}
           <p className="text-center text-xs text-ink-muted leading-relaxed">

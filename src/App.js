@@ -3,6 +3,7 @@ import { useAuth } from './hooks/useAuth';
 import { useOrganization } from './hooks/useOrganization';
 import LoadingSpinner from './components/ui/LoadingSpinner';
 import Layout from './components/layout/Layout';
+import { ToastProvider } from './components/ui/Toast';
 
 // Pages
 import Login from './pages/Login';
@@ -15,6 +16,7 @@ import Monitoring from './pages/Monitoring';
 import ComplianceReports from './pages/ComplianceReports';
 import Settings from './pages/Settings';
 import Remediation from './pages/Remediation';
+import NotFound from './pages/NotFound';
 
 // Protected Route Component
 function ProtectedRoute({ children }) {
@@ -49,6 +51,7 @@ function RootRoute() {
 
 function App() {
   return (
+    <ToastProvider>
     <Router>
       <Routes>
         <Route path="/" element={<RootRoute />} />
@@ -120,8 +123,18 @@ function App() {
             </ProtectedRoute>
           }
         />
+        {/* 404 Catch-all */}
+        <Route
+          path="*"
+          element={
+            <ProtectedRoute>
+              <NotFound />
+            </ProtectedRoute>
+          }
+        />
       </Routes>
     </Router>
+    </ToastProvider>
   );
 }
 

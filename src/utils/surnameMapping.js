@@ -25,9 +25,22 @@ const SINGH_SURNAME = 'Singh';
 
 // SC/ST associated surnames (0.0-0.2 score)
 const SC_ST_SURNAMES = new Set([
+  // Original entries
   'Chamar', 'Dhobi', 'Mahar', 'Mang', 'Paswan',
   'Musahar', 'Khatik', 'Balmiki', 'Valmiki',
-  'Parmar', 'Solanki'
+  'Parmar', 'Solanki',
+  // Maharashtra SC surnames (demo resumes + common)
+  'Jadhav', 'Kamble', 'Chavhan', 'Pawar', 'Thorat',
+  'Salve', 'Waghmare', 'Bhalerao', 'Gaikwad', 'Munde',
+  'Shinde', 'Kumbhar', 'Bansode', 'Bhosale', 'Shirsat',
+  'Shirke', 'Suryawanshi', 'Dhakane', 'Awate', 'Chavan',
+  // UP/Bihar SC surnames
+  'Ravidas', 'Harijan', 'Jatav', 'Dhobi', 'Bind',
+  'Nishad', 'Majhi', 'Pasi', 'Kori',
+  // Tamil Nadu SC surnames
+  'Paraiyar', 'Pallar', 'Arunthathiyar',
+  // General OBC/SC surnames
+  'Yadav', 'Kurmi', 'Koiri',
 ]);
 
 // Ambiguous surnames (0.5 score, confidence 0.3, flagged true)

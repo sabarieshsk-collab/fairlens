@@ -15,8 +15,16 @@ import { getSurnameScore } from '../utils/surnameMapping';
  * @returns {number} Skill score from 0-100
  */
 export function calculateSkillScore(candidate, requiredSkills) {
-  if (!candidate || !requiredSkills || requiredSkills.length === 0) {
-    return 0;
+  if (!candidate) return 0;
+
+  // When no required skills specified, compute a general skill score
+  // based on experience, projects, GitHub and breadth of skills listed
+  if (!requiredSkills || requiredSkills.length === 0) {
+    const expPoints = Math.min((candidate.years_experience || 0) / 8, 1) * 40;
+    const projectPoints = Math.min((candidate.projects_count || 0) / 4, 1) * 25;
+    const githubPoints = (candidate.github_active || candidate.githubActive) ? 15 : 0;
+    const skillsPoints = Math.min(((candidate.skills || []).length) / 8, 1) * 20;
+    return Math.round(expPoints + projectPoints + githubPoints + skillsPoints);
   }
 
   const candidateSkills = (candidate.skills || []).map(s => s.toLowerCase());
@@ -137,8 +145,8 @@ export function calculateDisparateImpact(candidates, groupingFn, threshold = 0.8
   const advantaged = candidates.filter(c => groupingFn(c) === 'advantaged');
   const disadvantaged = candidates.filter(c => groupingFn(c) === 'disadvantaged');
 
-  // Check for insufficient data
-  if (advantaged.length < 10 || disadvantaged.length < 10) {
+  // Check for insufficient data (minimum 2 per group for any meaningful calculation)
+  if (advantaged.length < 2 || disadvantaged.length < 2) {
     return {
       ratio: null,
       advantagedHireRate: null,

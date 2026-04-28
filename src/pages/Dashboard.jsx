@@ -1,14 +1,28 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { useAuth } from '../hooks/useAuth';
 import { useOrganization } from '../hooks/useOrganization';
 import { CircularProgressbar, buildStyles } from 'react-circular-progressbar';
 import 'react-circular-progressbar/dist/styles.css';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
-import { getProxyPlainEnglish } from '../services/biasCalculator';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine, Cell } from 'recharts';
 import { XMarkIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
+import { useLocation, Link } from 'react-router-dom';
+import { DEMO_AUDITS } from '../data/demoAudit';
+
+// Custom Tooltip for bar charts
+const CustomTooltip = ({ active, payload, label }) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    return (
+      <div className="bg-white border border-rule p-3 shadow-lg rounded">
+        <p className="font-semibold text-ink">{data.tier || label}: {data.rate}% hired ({data.count} candidates)</p>
+      </div>
+    );
+  }
+  return null;
+};
 
 // Sub-component: Metric Card
 function MetricCard({ title, value, status, explanation, threshold }) {
@@ -37,8 +51,44 @@ function MetricCard({ title, value, status, explanation, threshold }) {
   );
 }
 
+function generateProxySentence(proxyName, ratio) {
+  const pct = Math.round(ratio * 100);
+  const proxyLabels = {
+    college: 'Candidates from non-premier institutions',
+    city: 'Candidates from Tier 2 and Tier 3 cities',
+    surname: 'Candidates with surnames associated with historically marginalized communities',
+    company: 'Candidates from lower-tier previous employers',
+    gap: 'Candidates with employment gaps'
+  };
+  const label = proxyLabels[proxyName] || proxyName;
+  const status = ratio < 0.80 ? 'below the legal threshold' :
+                 ratio < 0.90 ? 'approaching the legal threshold' :
+                 'within acceptable range';
+  return `${label} are selected at ${pct}% the rate of candidates from advantaged backgrounds — ${status}.`;
+}
+
+function normalizeProxyRankingEntry(entry) {
+  if (typeof entry === 'string') {
+    return { proxy: entry, score: null, debug: null };
+  }
+  if (entry && typeof entry === 'object') {
+    const proxy = typeof entry.proxy === 'string' ? entry.proxy : null;
+    const score = typeof entry.score === 'number' ? entry.score : null;
+    return {
+      proxy,
+      score,
+      debug: proxy ? null : JSON.stringify(entry, null, 2)
+    };
+  }
+  return {
+    proxy: null,
+    score: null,
+    debug: JSON.stringify(entry, null, 2)
+  };
+}
+
 // Sub-component: Proxy Rankings Table
-function ProxyRankingsTable({ rankings, disparateImpacts }) {
+function ProxyRankingsTable({ rankings, disparateImpacts, proxyCorrelations }) {
   return (
     <div className="bg-white rounded-lg overflow-hidden">
       <div className="p-6 border-b border-rule">
@@ -55,16 +105,24 @@ function ProxyRankingsTable({ rankings, disparateImpacts }) {
             </tr>
           </thead>
           <tbody>
-            {rankings.map((item, idx) => {
-              const diData = disparateImpacts[item.proxy];
+            {rankings.map((entry, idx) => {
+              const normalized = normalizeProxyRankingEntry(entry);
+              const proxyName = normalized.proxy || 'unknown';
+              const diData = disparateImpacts[proxyName];
               const status = diData?.status || 'compliant';
               const rowBg = status === 'violation' ? 'bg-accent-light' : status === 'warning' ? 'bg-warn-light' : '';
+              const score = normalized.score ?? proxyCorrelations?.[proxyName] ?? 0;
+              const variableLabel = normalized.proxy
+                ? proxyName
+                : `Unknown (${normalized.debug || 'unrecognized structure'})`;
 
               return (
-                <tr key={item.proxy} className={`border-b border-rule ${rowBg}`}>
+                <tr key={`${proxyName}-${idx}`} className={`border-b border-rule ${rowBg}`}>
                   <td className="px-6 py-4 text-sm font-semibold text-ink">{idx + 1}</td>
-                  <td className="px-6 py-4 text-sm text-ink capitalize">{item.proxy}</td>
-                  <td className="px-6 py-4 text-sm font-mono text-ink">{item.score}</td>
+                  <td className="px-6 py-4 text-sm text-ink capitalize">{variableLabel}</td>
+                  <td className="px-6 py-4 text-sm font-mono text-ink">
+                    {Number.isFinite(score) ? score.toFixed(2) : '0.00'}
+                  </td>
                   <td className="px-6 py-4">
                     <span className={`px-2 py-1 text-xs font-bold rounded ${
                       status === 'violation' ? 'bg-accent text-white' :
@@ -81,28 +139,38 @@ function ProxyRankingsTable({ rankings, disparateImpacts }) {
         </table>
       </div>
       <div className="px-6 py-4 bg-paper border-t border-rule">
-        {rankings.map((item) => (
-          <p key={`finding-${item.proxy}`} className="text-sm text-ink-muted mb-2">
-            <strong className="text-ink capitalize">{item.proxy}:</strong> {
-              getProxyPlainEnglish(
-                item.proxy,
-                disparateImpacts[item.proxy]?.ratio,
-                disparateImpacts[item.proxy]?.advantagedHireRate,
-                disparateImpacts[item.proxy]?.disadvantagedHireRate
-              )
-            }
-          </p>
-        ))}
+        {rankings.map((entry, idx) => {
+          const normalized = normalizeProxyRankingEntry(entry);
+          const proxyName = normalized.proxy || 'unknown';
+          const ratio = disparateImpacts[proxyName]?.ratio || 1;
+          const label = normalized.proxy
+            ? proxyName
+            : `unknown (${normalized.debug || 'unrecognized structure'})`;
+          return (
+            <p key={`finding-${proxyName}-${idx}`} className="text-sm text-ink-muted mb-2">
+              <strong className="text-ink capitalize">{label}:</strong> {generateProxySentence(proxyName, ratio)}
+            </p>
+          );
+        })}
       </div>
     </div>
   );
 }
 
 // Sub-component: Candidate Table with filtering
-function CandidateTable({ candidates, onSelectCandidate }) {
+function CandidateTable({ candidates, onSelectCandidate, isHistorical }) {
   const [decisionFilter, setDecisionFilter] = useState('all');
   const [proxyFilter, setProxyFilter] = useState('all');
   const [tierFilter, setTierFilter] = useState('all');
+
+  if (isHistorical) {
+    return (
+      <div className="bg-white rounded-lg p-8 text-center border border-rule">
+        <h2 className="font-serif text-2xl font-bold text-ink mb-2">Candidate Details</h2>
+        <p className="text-ink-muted">Candidate-level data for historical audits is not available in this view. Run a new audit to see individual candidate details.</p>
+      </div>
+    );
+  }
 
   const filtered = candidates.filter(c => {
     if (decisionFilter !== 'all' && c.decision !== decisionFilter) return false;
@@ -204,18 +272,52 @@ function CandidateTable({ candidates, onSelectCandidate }) {
 }
 
 // Sub-component: Candidate Detail Panel
-function CandidateDetailPanel({ candidate, onClose, counterfactual, featureContributions }) {
+function CandidateDetailPanel({ candidate, onClose, auditMetrics }) {
+  const [loadingNarrative, setLoadingNarrative] = useState(false);
+  const [localCounterfactual, setLocalCounterfactual] = useState(candidate?.counterfactual || null);
+
+  useEffect(() => {
+    if (!candidate) return;
+    setLocalCounterfactual(candidate.counterfactual || null);
+    
+    if (!candidate.counterfactual && candidate.decision === 'rejected') {
+      const getCF = async () => {
+        setLoadingNarrative(true);
+        try {
+          // Dynamic import of gemini to avoid initial load block
+          const { generateCounterfactualNarrative } = await import('../services/gemini.js');
+          const res = await generateCounterfactualNarrative(candidate, auditMetrics);
+          setLocalCounterfactual(res);
+          candidate.counterfactual = res;
+        } catch (e) {
+          console.error(e);
+          // Use a simple fallback sentence if Gemini import/call fails
+          const topProxyEntry = auditMetrics?.proxyRankings?.[0];
+          const topProxy = normalizeProxyRankingEntry(topProxyEntry).proxy || 'background profile';
+          const proxyDescriptions = {
+            college: 'college was classified as Tier 1',
+            city: 'home city was a Tier 1 metropolitan area',
+            surname: 'surname did not trigger the proxy correlation flag',
+            company: 'previous employer was a Tier 1 company',
+            gap: 'career history had no employment gaps'
+          };
+          const description = proxyDescriptions[topProxy] || 'background profile matched the advantaged group';
+          setLocalCounterfactual(`${candidate.name} would have been selected if their ${description}, because their skill score of ${candidate.skillScore} was above the selection threshold — meaning skill was not the deciding factor.`);
+        }
+        setLoadingNarrative(false);
+      };
+      getCF();
+    }
+  }, [candidate, auditMetrics]);
+
   if (!candidate) return null;
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden">
-      {/* Backdrop */}
       <div className="absolute inset-0 bg-black bg-opacity-50 transition-opacity" onClick={onClose}></div>
 
-      {/* Slide-in Panel */}
       <div className="absolute right-0 top-0 bottom-0 w-full md:w-2/3 lg:w-1/2 bg-white shadow-xl overflow-y-auto">
-        {/* Header */}
-        <div className="sticky top-0 bg-white border-b border-rule p-6 flex items-start justify-between">
+        <div className="sticky top-0 bg-white border-b border-rule p-6 flex items-start justify-between z-10">
           <div className="flex-1">
             <h2 className="font-serif text-2xl font-bold text-ink mb-2">{candidate.name}</h2>
             <div className="flex items-center gap-3">
@@ -232,9 +334,7 @@ function CandidateDetailPanel({ candidate, onClose, counterfactual, featureContr
           </button>
         </div>
 
-        {/* Content */}
         <div className="p-6 space-y-6">
-          {/* Skills Section */}
           <div>
             <h3 className="font-medium text-ink mb-3">Skills Assessment</h3>
             <div className="space-y-2">
@@ -247,7 +347,6 @@ function CandidateDetailPanel({ candidate, onClose, counterfactual, featureContr
             </div>
           </div>
 
-          {/* Background Signals */}
           <div>
             <h3 className="font-medium text-ink mb-3">Background Signals</h3>
             <div className="space-y-2">
@@ -272,47 +371,50 @@ function CandidateDetailPanel({ candidate, onClose, counterfactual, featureContr
             </div>
           </div>
 
-          {/* Counterfactual Analysis */}
-          {counterfactual && counterfactual.available && (
-            <div className="border-2 border-accent2 rounded-lg p-4 bg-accent2-light">
-              <h3 className="font-medium text-ink-muted mb-2 text-sm">Counterfactual Analysis</h3>
-              <p className="text-sm text-ink mb-3">{counterfactual.explanation}</p>
-              {counterfactual.changedFeature && (
-                <div className="bg-white rounded p-3 text-xs">
-                  <p className="text-ink-muted">Would change: <strong className="text-ink">{counterfactual.changedFeature}</strong></p>
-                  <p className="text-ink-muted">From: <strong className="text-ink">{counterfactual.originalValue}</strong></p>
-                  <p className="text-ink-muted">To: <strong className="text-ink">{counterfactual.counterfactualValue}</strong></p>
-                </div>
-              )}
-              <p className="text-xs text-ink-muted mt-3 italic">
-                Model confidence: {counterfactual.modelAccuracy}% based on {counterfactual.batchSize} candidates
-              </p>
-            </div>
-          )}
+          <div className="border-2 border-accent2 rounded-lg p-4 bg-accent2-light">
+            <h3 className="font-medium text-ink-muted mb-2 text-sm">Counterfactual Analysis</h3>
+            {candidate.decision === 'hired' ? (
+              <p className="text-sm text-ink mb-3">This candidate was selected. Counterfactual analysis is only generated for rejected candidates.</p>
+            ) : localCounterfactual ? (
+              <p className="text-sm text-ink mb-3">{localCounterfactual}</p>
+            ) : loadingNarrative ? (
+              <div>
+                <div className="skeleton w-full h-6 mb-3"></div>
+                <p className="text-sm text-ink-muted">Gemini is generating a counterfactual analysis for this candidate...</p>
+              </div>
+            ) : (
+              <p className="text-sm text-ink mb-3 text-ink-muted">Analysis unavailable.</p>
+            )}
+          </div>
 
-          {/* Feature Contributions */}
-          {featureContributions && (
+          {candidate.featureContributions ? (
             <div>
               <h3 className="font-medium text-ink mb-3 text-sm">Feature Importance</h3>
-              <div className="space-y-2">
-                {Object.entries(featureContributions).map(([feature, contribution]) => (
-                  <div key={feature} className="flex items-center justify-between">
-                    <span className="text-xs text-ink-muted capitalize w-24">{feature}</span>
-                    <div className="flex-1 mx-3 h-2 bg-rule rounded overflow-hidden">
-                      <div
-                        className={`h-full ${contribution > 0 ? 'bg-success' : 'bg-accent'}`}
-                        style={{ width: `${Math.min(Math.abs(contribution) / 30 * 100, 100)}%` }}
-                      ></div>
-                    </div>
-                    <span className={`text-xs font-bold font-mono w-12 text-right ${
-                      contribution > 0 ? 'text-success' : 'text-accent'
-                    }`}>
-                      {contribution > 0 ? '+' : ''}{contribution}
-                    </span>
-                  </div>
-                ))}
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart layout="vertical" data={
+                    Object.entries(candidate.featureContributions)
+                      .map(([feature, val]) => ({ feature, value: val }))
+                      .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
+                  } margin={{ top: 0, right: 30, left: 40, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                    <XAxis type="number" />
+                    <YAxis type="category" dataKey="feature" width={100} tick={{ fontSize: 12 }} />
+                    <Tooltip />
+                    <Bar dataKey="value" fill="#8884d8">
+                      {Object.entries(candidate.featureContributions)
+                        .map(([feature, val]) => ({ feature, value: val }))
+                        .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
+                        .map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.value > 0 ? '#1a6b3a' : '#c9400a'} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             </div>
+          ) : (
+            <p className="text-sm text-ink-muted">Feature contribution data not available for this candidate.</p>
           )}
         </div>
       </div>
@@ -327,43 +429,37 @@ export default function Dashboard() {
   const [audit, setAudit] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedCandidate, setSelectedCandidate] = useState(null);
-  const [counterfactual, setCounterfactual] = useState(null);
+  const location = useLocation();
+  const requestedAuditId = location.state?.auditId;
 
   useEffect(() => {
     if (!organization || !user) return;
 
     const fetchAudit = async () => {
-      if (user.uid === 'mock-user-123') {
-        setAudit({
-          metrics: {
-            totalCandidates: 120,
-            fairnessHealthScore: 85,
-            disparateImpactByCollege: { ratio: 0.85, status: 'compliant', advantagedHireRate: 40, disadvantagedHireRate: 34 },
-            disparateImpactByCity: { ratio: 0.92, status: 'compliant', advantagedHireRate: 38, disadvantagedHireRate: 35 },
-            disparateImpactBySurname: { ratio: 1.15, status: 'warning', advantagedHireRate: 42, disadvantagedHireRate: 36 },
-            equalOpportunityDiff: 0.08,
-            falsePositiveRateDiff: 0.05,
-            proxyCorrelations: { average: 0.18 },
-            proxyRankings: [
-              { proxy: 'surname', score: 0.25, status: 'warning' },
-              { proxy: 'college', score: 0.15, status: 'compliant' },
-              { proxy: 'city', score: 0.12, status: 'compliant' }
-            ]
-          },
-          candidates: [
-            { id: 1, name: 'Aarav M.', decision: 'hired', skillScore: 88, collegeTier: 1, cityTier: 1, proxyRisk: 'none', flagged: false },
-            { id: 2, name: 'Priya K.', decision: 'rejected', skillScore: 72, collegeTier: 3, cityTier: 2, proxyRisk: 'medium', flagged: true },
-            { id: 3, name: 'Rahul S.', decision: 'hired', skillScore: 91, collegeTier: 2, cityTier: 1, proxyRisk: 'none', flagged: false }
-          ],
-          chartData: {
-            collegeTier: [ { tier: 'Tier 1', rate: 40 }, { tier: 'Tier 2', rate: 36 }, { tier: 'Tier 3', rate: 34 } ],
-            cityTier: [ { tier: 'Tier 1', rate: 38 }, { tier: 'Tier 2', rate: 36 }, { tier: 'Tier 3', rate: 35 } ]
-          }
-        });
+      // Historical mode
+      if (requestedAuditId && ['demo-audit-001', 'demo-audit-002', 'demo-audit-003'].includes(requestedAuditId)) {
+        const histAudit = DEMO_AUDITS.find(a => a.auditId === requestedAuditId);
+        setAudit({ ...histAudit, isHistorical: true });
         setLoading(false);
         return;
       }
 
+      // Mock mode
+      if (organization.id === 'demo-org-001' || user.uid.includes('demo-')) {
+        const mockDataStr = sessionStorage.getItem('fairlens_last_audit');
+        if (mockDataStr) {
+          try {
+            const parsed = JSON.parse(mockDataStr);
+            setAudit({ ...parsed.audit, candidates: parsed.candidates, isHistorical: false });
+          } catch(e) {
+            console.error('Failed to parse mock data', e);
+          }
+        }
+        setLoading(false);
+        return;
+      }
+
+      // Real Firebase mode
       try {
         const q = query(
           collection(db, 'organizations', user.uid, 'audits'),
@@ -374,7 +470,13 @@ export default function Dashboard() {
 
         const querySnapshot = await getDocs(q);
         if (querySnapshot.docs.length > 0) {
-          setAudit(querySnapshot.docs[0].data());
+          const auditDoc = querySnapshot.docs[0];
+          const auditData = auditDoc.data();
+          
+          const candsSnapshot = await getDocs(collection(db, 'organizations', user.uid, 'audits', auditDoc.id, 'candidates'));
+          const candsData = candsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+          
+          setAudit({ ...auditData, candidates: candsData, isHistorical: false });
         }
         setLoading(false);
       } catch (error) {
@@ -384,24 +486,93 @@ export default function Dashboard() {
     };
 
     fetchAudit();
-  }, [organization, user]);
+  }, [organization, user, requestedAuditId]);
 
-  if (loading) return <LoadingSpinner />;
+  const candidates = audit?.candidates || [];
+  
+  const collegeTierChartData = useMemo(() => {
+    return [1, 2, 3, 4].map(tier => {
+      const inTier = candidates.filter(c => c.collegeTier === tier);
+      if (inTier.length === 0) return { tier: `Tier ${tier}`, rate: 0, count: 0 };
+      const hired = inTier.filter(c => c.decision === 'hired').length;
+      return {
+        tier: `Tier ${tier}`,
+        rate: Math.round((hired / inTier.length) * 100),
+        count: inTier.length
+      };
+    }).filter(d => d.count > 0);
+  }, [candidates]);
+
+  const cityTierChartData = useMemo(() => {
+    return [1, 2, 3].map(tier => {
+      const inTier = candidates.filter(c => c.cityTier === tier);
+      if (inTier.length === 0) return { tier: `Tier ${tier}`, rate: 0, count: 0 };
+      const hired = inTier.filter(c => c.decision === 'hired').length;
+      return {
+        tier: `Tier ${tier}`,
+        rate: Math.round((hired / inTier.length) * 100),
+        count: inTier.length
+      };
+    }).filter(d => d.count > 0);
+  }, [candidates]);
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        {/* Skeleton: Score + Metric Cards */}
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          <div className="flex flex-col items-center justify-center p-8">
+            <div className="skeleton-circle w-32 h-32 mb-4"></div>
+            <div className="skeleton w-24 h-4"></div>
+          </div>
+          {[1,2,3].map(i => (
+            <div key={i} className="bg-white rounded-lg p-6 border border-rule">
+              <div className="flex justify-between mb-4">
+                <div className="skeleton w-28 h-4"></div>
+                <div className="skeleton w-16 h-5 rounded-full"></div>
+              </div>
+              <div className="skeleton w-20 h-8 mb-3"></div>
+              <div className="skeleton w-full h-3 mb-2"></div>
+              <div className="skeleton w-3/4 h-3"></div>
+            </div>
+          ))}
+        </div>
+        {/* Skeleton: Candidate Table */}
+        <div className="bg-white rounded-lg p-6 border border-rule">
+          <div className="skeleton w-40 h-6 mb-6"></div>
+          {[1,2,3,4,5].map(i => (
+            <div key={i} className="flex items-center gap-4 py-3 border-b border-rule last:border-b-0">
+              <div className="skeleton w-40 h-4"></div>
+              <div className="skeleton w-16 h-4 ml-auto"></div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   if (!audit) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-96">
-        <div className="text-center">
+      <div className="flex flex-col items-center justify-center min-h-[60vh]">
+        <div className="text-center max-w-md mx-auto">
+          <div className="w-16 h-16 bg-accent/10 rounded-full flex items-center justify-center mx-auto mb-6">
+            <span className="font-serif text-2xl font-bold text-accent">FL</span>
+          </div>
           <h2 className="font-serif text-3xl font-bold text-ink mb-3">No audits yet</h2>
-          <p className="text-ink-muted mb-6">
-            Start your first hiring audit to see fairness metrics.
+          <p className="text-ink-muted mb-8 leading-relaxed">
+            Upload your first batch of resumes to see fairness metrics, bias patterns, and compliance status for your hiring AI.
           </p>
-          <a
-            href="/new-audit"
-            className="inline-block px-6 py-3 bg-accent text-white rounded-lg font-medium hover:shadow-lg transition-shadow"
-          >
-            Start New Audit
-          </a>
+          <div className="flex flex-col gap-4 items-center">
+            <Link
+              to="/new-audit"
+              className="inline-block px-8 py-3 bg-accent text-white rounded-lg font-medium hover:shadow-lg transition-shadow w-full sm:w-auto"
+            >
+              Start Your First Audit
+            </Link>
+            <Link to="/audit-history" className="text-sm font-medium text-ink hover:text-accent transition-colors">
+              View Audit History
+            </Link>
+          </div>
         </div>
       </div>
     );
@@ -409,13 +580,13 @@ export default function Dashboard() {
 
   // Parse audit metrics
   const metrics = audit.metrics || {};
-  const candidates = audit.candidates || [];
 
   // Determine status colors
-  const getHealthColor = (score) => {
-    if (score >= 75) return '#1a6b3a';
-    if (score >= 50) return '#8a5a00';
-    return '#c9400a';
+  const score = metrics.fairnessHealthScore || 0;
+  const getHealthColor = (s) => {
+    if (s >= 80) return '#1A6B3A';
+    if (s >= 60) return '#8A5A00';
+    return '#C9400A';
   };
 
   const disparateImpacts = {
@@ -425,7 +596,7 @@ export default function Dashboard() {
   };
 
   // Check if no bias detected
-  const noBiasDetected = Object.values(disparateImpacts).every(di => di?.status === 'compliant' || !di?.violation);
+  const noBiasDetected = Object.values(disparateImpacts).every(di => di?.status === 'pass' || !di?.violation);
   const smallBatch = metrics.totalCandidates < 50;
 
   return (
@@ -448,19 +619,20 @@ export default function Dashboard() {
         )}
 
         {/* Section 1: Fairness Health Score */}
-        <div className="bg-white rounded-lg p-8">
+        <div className="bg-white rounded-lg p-8 shadow-sm border border-rule">
           <div className="flex flex-col items-center">
             <div style={{ width: 200, height: 200 }} className="mb-4">
               <CircularProgressbar
-                value={metrics.fairnessHealthScore || 0}
+                value={score}
+                text={`${Math.round(score)}`}
                 strokeWidth={4}
                 styles={buildStyles({
                   rotation: 0.25,
                   strokeLinecap: 'round',
-                  textSize: '16px',
+                  textSize: '20px',
                   pathTransitionDuration: 0.5,
-                  pathColor: getHealthColor(metrics.fairnessHealthScore || 0),
-                  textColor: '#0f0e0d',
+                  pathColor: getHealthColor(score),
+                  textColor: getHealthColor(score),
                   trailColor: '#e0dbd3',
                   backgroundColor: '#faf9f6'
                 })}
@@ -477,12 +649,7 @@ export default function Dashboard() {
             title="Disparate Impact Ratio"
             value={metrics.disparateImpactByCollege?.ratio?.toFixed(2) || '—'}
             status={metrics.disparateImpactByCollege?.status || 'compliant'}
-            explanation={getProxyPlainEnglish(
-              'college tier',
-              metrics.disparateImpactByCollege?.ratio,
-              metrics.disparateImpactByCollege?.advantagedHireRate,
-              metrics.disparateImpactByCollege?.disadvantagedHireRate
-            )}
+            explanation={generateProxySentence('college', metrics.disparateImpactByCollege?.ratio || 1)}
             threshold="Legal threshold: 0.80 (four-fifths rule)"
           />
           <MetricCard
@@ -512,19 +679,20 @@ export default function Dashboard() {
         <ProxyRankingsTable
           rankings={metrics.proxyRankings || []}
           disparateImpacts={disparateImpacts}
+          proxyCorrelations={metrics.proxyCorrelations}
         />
 
         {/* Section 4: Charts */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* College Tier Chart */}
-          <div className="bg-white rounded-lg p-6">
+          <div className="bg-white rounded-lg p-6 shadow-sm border border-rule">
             <h3 className="font-medium text-ink mb-4">Selection Rate by College Tier</h3>
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={audit.chartData?.collegeTier || []}>
+              <BarChart data={collegeTierChartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e0dbd3" />
                 <XAxis dataKey="tier" />
-                <YAxis />
-                <Tooltip />
+                <YAxis domain={[0, 100]} />
+                <Tooltip content={<CustomTooltip />} />
                 <ReferenceLine y={80} stroke="#c9400a" strokeDasharray="5 5" label="Legal Threshold" />
                 <Bar dataKey="rate" fill="#1a6b3a" />
               </BarChart>
@@ -532,14 +700,14 @@ export default function Dashboard() {
           </div>
 
           {/* City Tier Chart */}
-          <div className="bg-white rounded-lg p-6">
+          <div className="bg-white rounded-lg p-6 shadow-sm border border-rule">
             <h3 className="font-medium text-ink mb-4">Selection Rate by City Tier</h3>
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={audit.chartData?.cityTier || []}>
+              <BarChart data={cityTierChartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e0dbd3" />
                 <XAxis dataKey="tier" />
-                <YAxis />
-                <Tooltip />
+                <YAxis domain={[0, 100]} />
+                <Tooltip content={<CustomTooltip />} />
                 <ReferenceLine y={80} stroke="#c9400a" strokeDasharray="5 5" label="Legal Threshold" />
                 <Bar dataKey="rate" fill="#1a4d7a" />
               </BarChart>
@@ -549,19 +717,9 @@ export default function Dashboard() {
 
         {/* Section 5: Candidate Table */}
         <CandidateTable
-          candidates={candidates.map(c => ({
-            id: c.id,
-            name: c.name,
-            decision: c.decision,
-            skillScore: c.skillScore,
-            collegeTier: c.collegeTier,
-            cityTier: c.cityTier,
-            gapScore: c.gapScore,
-            skills: c.skills,
-            proxyRisk: c.proxyRisk,
-            flagged: c.flagged
-          }))}
+          candidates={candidates}
           onSelectCandidate={setSelectedCandidate}
+          isHistorical={audit.isHistorical}
         />
 
       {/* Candidate Detail Panel */}
@@ -569,8 +727,7 @@ export default function Dashboard() {
         <CandidateDetailPanel
           candidate={selectedCandidate}
           onClose={() => setSelectedCandidate(null)}
-          counterfactual={counterfactual}
-          featureContributions={selectedCandidate.featureContributions}
+          auditMetrics={metrics}
         />
       )}
     </div>

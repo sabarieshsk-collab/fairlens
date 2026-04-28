@@ -1,0 +1,40 @@
+%PDF-1.1
+%âãÏÓ
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 176 >>
+stream
+BT
+/F1 12 Tf
+72 720 Td (Priya Kumari) Tj
+0 -18 Td (University of Bihar, Patna - Tier 4) Tj
+0 -18 Td (Skills: Java, Python, Spring Boot, MySQL) Tj
+0 -18 Td (Experience: 5 years; Projects: 3 deployed) Tj
+0 -18 Td (Previous company: Mid-tier IT services firm) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000010 00000 n 
+0000000060 00000 n 
+0000000110 00000 n 
+0000000210 00000 n 
+0000000400 00000 n 
+trailer
+<< /Root 1 0 R /Size 6 >>
+startxref
+520
+%%EOF

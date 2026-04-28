@@ -18,18 +18,24 @@ export function useOrganization() {
       return;
     }
 
-    if (user.uid === 'mock-user-123') {
-      if (localStorage.getItem('fairlens_onboarding_complete') === 'true') {
-        setOrganization({
-          orgId: 'mock-org-123',
-          name: 'Tech Corp India',
-          sector: 'Technology',
-          headcount: '500-2000',
-          states: ['Karnataka', 'Maharashtra']
-        });
-      } else {
-        setOrganization(null);
-      }
+    if (user.orgId === 'demo-org-001') {
+      setOrganization({
+        orgId: 'demo-org-001',
+        name: 'Infosys Technologies Ltd',
+        sector: 'Technology',
+        headcount: '2000+',
+        states: ['Karnataka', 'Maharashtra', 'Tamil Nadu', 'Telangana'],
+        protected_groups: {
+          caste: true,
+          gender: true,
+          regional: true,
+          religion: false,
+          disability: false
+        },
+        upload_method: 'manual',
+        data_retention_days: 90,
+        onboarding_complete: true
+      });
       setFetchedUid(user.uid);
       return;
     }
