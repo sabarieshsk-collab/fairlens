@@ -358,7 +358,7 @@ export default function NewAudit() {
 
   const checkApiKey = () => {
     if (!parseApiUrl) {
-      setApiError('Resume parse API URL is missing. Set REACT_APP_RESUME_PARSE_API_URL=http://localhost:5000/api/parse.');
+      setApiError('Resume parse API URL is missing. Set REACT_APP_API_URL=https://fairlens-backend-3m2c.onrender.com');
       return true;
     }
     setApiError('');
